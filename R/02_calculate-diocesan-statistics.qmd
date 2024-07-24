@@ -1,0 +1,86 @@
+---
+title: "Calculate CoM Area Statistics"
+author: "Dave"
+format: html
+editor: visual
+---
+
+## Housekeeping
+
+### Libraries
+
+```{r libs}
+library(here)
+library(fs)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(vroom)
+library(magrittr)
+library(stringr)
+```
+
+## Load in Data
+
+### Load in census data
+
+```{r load_in_data}
+stats <- dir_ls(here("census-data-scotland"))
+
+names(stats) <- 
+  path_file(names(stats)) |> 
+  path_ext_remove()
+
+stats <- map(stats, readRDS)
+```
+
+### Load in spatial overlap tables
+
+```{r loadInSpatialOverlapTables}
+
+oa_overlaps <-
+  vroom(here("diocese-intersection-tables", "sec-diocese-oa-overlaps.csv"),
+             col_types = "ccd")
+
+
+```
+
+## Join stats to dioceses
+
+```{r joinStatsToAreas}
+diocese_stats <- 
+  map(stats, \(x) left_join(oa_overlaps, x, by = c("oa_2022_code" = "oa_code_2021")))
+
+```
+
+## Multiply by overlap percentage
+
+```{r multiplyOverlap}
+diocese_stats <- map(diocese_stats, \(x){
+  mutate(x, across(where(is.numeric), \(x) x * oa_in_dio)) |> 
+    select(-oa_in_dio)
+  })
+```
+
+## Create summary tables
+
+```{r summaryTables}
+summaries <- map(diocese_stats, 
+                 \(x){
+                   summarise(x, across(where(is.numeric), sum), .by = diocese)
+                 })
+```
+
+## Save all data
+
+```{r saveAllData}
+stats <- dir_create(here("diocesan-stats"))
+
+iwalk(summaries, 
+      \(x, x_nm){
+        nice_name <- str_replace_all(x_nm, "_", "-")
+        file_name <- path(stats, nice_name, ext = "csv")
+        
+        vroom_write(x, file_name, delim = ",", bom = TRUE)
+      })
+```

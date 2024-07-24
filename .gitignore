@@ -1,0 +1,13 @@
+.Rproj.user
+/geospatial-data/2021_*
+*.html
+R/*_files
+*.xlsx
+/.Rhistory
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+.quarto
+diocesan-stats/diocesan-stats-by-civic-area
+civic-areas/

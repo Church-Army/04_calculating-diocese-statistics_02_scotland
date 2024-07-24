@@ -1,0 +1,117 @@
+---
+title: "Calculate Diocese OA overlaps"
+author: "Dave"
+format: html
+editor: visual
+---
+
+## Housekeeping
+
+### Libraries
+
+```{r libraries}
+#| message: false
+library(here)
+library(fs)
+
+library(sf)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(vroom)
+```
+
+### Read in Data
+
+```{r readIn}
+dioceses <- read_sf(
+  here("geospatial-data", "scottish-episcopal-church-dioceses")
+)
+
+oa <- read_sf(
+  here("geospatial-data", "civic-areas", "2022_output-area_mean-high-water-mark"))
+```
+
+## Format Data
+
+### Reproject diocesan shapes
+
+```{r reproject}
+dioceses <- st_transform(dioceses, st_crs(oa))
+
+dioceses <- select(dioceses, diocese = Diocese)
+
+oa <- select(oa, oa_2022_code = code)
+```
+
+## Find intersections
+
+```{r findIntersections}
+dioceses <- rowwise(dioceses)
+
+## Get indeces of intersecting OA
+dioceses <- mutate(dioceses,
+                       intersecting_oa = 
+                         list(
+                           st_intersects(geometry, oa, sparse = FALSE) |> 
+                             as.vector())) # otherwise is 1-row matrix
+
+## Get OA where intersecting
+dioceses <- mutate(dioceses,
+                       intersecting_oa = 
+                         list(
+                           oa[intersecting_oa,]
+                         ))
+
+## Calculate intersection
+dioceses <- mutate(dioceses,
+                       intersecting_oa = 
+                         list(
+                           mutate(intersecting_oa,
+                                intersection =
+                                  st_intersection(geometry, .env$geometry),
+                                intersecting_area = st_area(intersection),
+                                oa_area           = st_area(geometry),
+                                oa_in_dio =
+                                  round(intersecting_area / oa_area, 5))))
+
+rm(oa)
+
+# check it's doing what we expect
+dioceses[["intersecting_oa"]][[1]] |>
+  filter(intersecting_area != oa_area) |>
+  arrange(intersecting_area - oa_area)
+
+dioceses <- mutate(dioceses,
+                       intersecting_oa = 
+                         list(
+                           as_tibble(intersecting_oa) |> 
+                             select(oa_2022_code, oa_in_dio)
+                         ))
+```
+
+### Unnest
+
+```{r unnest}
+dioceses <- unnest(dioceses, intersecting_oa)
+
+dioceses <- 
+  as_tibble(dioceses) |>
+  select(diocese, oa_2022_code, oa_in_dio) |> 
+  mutate(oa_in_dio = unclass(oa_in_dio)) |> 
+  arrange(diocese, oa_in_dio) |>
+  filter(oa_in_dio != 0)
+```
+
+```{}
+```
+
+## Save
+
+```{r saveIntersections}
+out_dir <- dir_create(here("diocese-intersection-tables"))
+
+vroom_write(dioceses, here(out_dir, "sec-diocese-oa-overlaps.csv"), ",",
+            bom = TRUE)
+```
+
